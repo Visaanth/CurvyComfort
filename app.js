@@ -196,9 +196,18 @@ const brandingHeroPreview = document.getElementById('branding-hero-preview');
 const resetBrandingBtn = document.getElementById('reset-branding-btn');
 
 // --- INIT APP ---
-document.addEventListener('DOMContentLoaded', () => {
-  loadData();
+document.addEventListener('DOMContentLoaded', async () => {
+  loadLocalCartAndWishlist();
+  
+  // Apply cached/saved visuals immediately
   applyBrandingVisuals();
+  
+  // Fetch latest data from server
+  await Promise.all([
+    fetchProducts(),
+    fetchBranding()
+  ]);
+
   checkAdminSession();
   renderProducts();
   renderNewArrivals();
@@ -208,22 +217,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initAnalyticsTracking();
 });
 
-// --- LOCAL STORAGE DATA LOAD ---
-function syncCatalogWithDefaults() {
-  productsDatabase.forEach(p => {
-    const defaultItem = DEFAULT_PRODUCTS.find(d => d.id === p.id);
-    if (defaultItem && !String(p.image).startsWith('data:')) {
-      p.image = defaultItem.image;
-      p.name = defaultItem.name;
-      p.category = defaultItem.category;
-    }
-  });
-  productsDatabase = productsDatabase.filter(
-    p => p.category !== 'workwear' && p.category !== 'dresses'
-  );
-}
-
-function loadData() {
+// --- BACKEND AND LOCAL STORAGE DATA LOAD ---
+function loadLocalCartAndWishlist() {
   const storedCart = localStorage.getItem('curvy_comfort_cart');
   const storedWishlist = localStorage.getItem('curvy_comfort_wishlist');
   const storedRecent = localStorage.getItem('curvy_comfort_recent');
@@ -231,39 +226,57 @@ function loadData() {
   if (storedCart) cart = JSON.parse(storedCart);
   if (storedWishlist) wishlist = JSON.parse(storedWishlist);
   if (storedRecent) recentlyViewed = JSON.parse(storedRecent);
+}
 
-  const storedVersion = localStorage.getItem('curvy_comfort_catalog_version');
-  if (storedVersion !== CATALOG_VERSION) {
-    localStorage.setItem('curvy_comfort_catalog_version', CATALOG_VERSION);
-    localStorage.removeItem('curvy_comfort_brand_logo');
-    localStorage.removeItem('curvy_comfort_brand_hero');
-    productsDatabase = [...DEFAULT_PRODUCTS];
-    localStorage.setItem('curvy_comfort_products', JSON.stringify(productsDatabase));
+async function fetchProducts() {
+  try {
+    const response = await fetch('/api/products');
+    if (!response.ok) throw new Error('Failed to fetch catalog');
+    productsDatabase = await response.json();
+    
+    // Filter cart/wishlist/recent to only contain items present in the backend catalog
     cart = cart.filter(item => productsDatabase.some(p => p.id === item.id));
     wishlist = wishlist.filter(item => productsDatabase.some(p => p.id === item.id));
     recentlyViewed = recentlyViewed.filter(item => productsDatabase.some(p => p.id === item.id));
-    saveData();
-  } else {
-    const storedCatalog = localStorage.getItem('curvy_comfort_products');
-    if (storedCatalog) {
-      productsDatabase = JSON.parse(storedCatalog);
-      syncCatalogWithDefaults();
-      localStorage.setItem('curvy_comfort_products', JSON.stringify(productsDatabase));
-    } else {
-      productsDatabase = [...DEFAULT_PRODUCTS];
-      localStorage.setItem('curvy_comfort_products', JSON.stringify(productsDatabase));
-    }
+    
+    updateCounts();
+    renderRecentlyViewed();
+  } catch (err) {
+    console.error('Error loading catalog from backend:', err);
+    // Fallback to DEFAULT_PRODUCTS in case backend is offline
+    productsDatabase = [...DEFAULT_PRODUCTS];
   }
+}
 
-  updateCounts();
-  renderRecentlyViewed();
+async function fetchBranding() {
+  try {
+    const response = await fetch('/api/branding');
+    if (!response.ok) throw new Error('Failed to load branding settings');
+    const branding = await response.json();
+    
+    if (branding.brand_logo) {
+      localStorage.setItem('curvy_comfort_brand_logo', branding.brand_logo);
+    } else {
+      localStorage.removeItem('curvy_comfort_brand_logo');
+    }
+    
+    if (branding.brand_hero) {
+      localStorage.setItem('curvy_comfort_brand_hero', branding.brand_hero);
+    } else {
+      localStorage.removeItem('curvy_comfort_brand_hero');
+    }
+    
+    applyBrandingVisuals();
+  } catch (err) {
+    console.error('Error fetching branding settings:', err);
+    applyBrandingVisuals();
+  }
 }
 
 function saveData() {
   localStorage.setItem('curvy_comfort_cart', JSON.stringify(cart));
   localStorage.setItem('curvy_comfort_wishlist', JSON.stringify(wishlist));
   localStorage.setItem('curvy_comfort_recent', JSON.stringify(recentlyViewed));
-  localStorage.setItem('curvy_comfort_products', JSON.stringify(productsDatabase));
   updateCounts();
 }
 
@@ -348,17 +361,37 @@ function initAdminListeners() {
       const email = adminEmailInput.value.trim();
       const password = adminPasswordInput.value;
 
-      if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-        localStorage.setItem('curvy_comfort_admin_active', 'true');
-        enableAdminMode();
-        closeModal(adminLoginModal);
-        adminLoginForm.reset();
-        adminLoginError.style.display = 'none';
-        renderProducts();
-        alert('Welcome back, Admin! Catalog administration controls activated.');
-      } else {
+      fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      })
+      .then(async res => {
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Invalid credentials');
+        }
+        return res.json();
+      })
+      .then(data => {
+        if (data.success) {
+          localStorage.setItem('curvy_comfort_admin_active', 'true');
+          enableAdminMode();
+          closeModal(adminLoginModal);
+          adminLoginForm.reset();
+          adminLoginError.style.display = 'none';
+          renderProducts();
+          alert('Welcome back, Admin! Catalog administration controls activated.');
+        } else {
+          adminLoginError.innerText = 'Invalid email or password credentials';
+          adminLoginError.style.display = 'block';
+        }
+      })
+      .catch(err => {
+        console.error(err);
+        adminLoginError.innerText = err.message || 'Authentication error';
         adminLoginError.style.display = 'block';
-      }
+      });
     });
   }
 
@@ -409,46 +442,74 @@ function initAdminListeners() {
       const badge = inputProdBadge.value.trim();
       const imageBase64 = inputProdImageBase64.value;
 
+      const payload = { name, price, category, badge };
+      if (imageBase64) {
+        payload.image = imageBase64;
+      }
+
       if (id) {
         // --- EDIT MODE ---
-        const prodIndex = productsDatabase.findIndex(p => p.id === id);
-        if (prodIndex > -1) {
-          productsDatabase[prodIndex].name = name;
-          productsDatabase[prodIndex].price = price;
-          productsDatabase[prodIndex].category = category;
-          productsDatabase[prodIndex].badge = badge;
-          if (imageBase64) {
-            productsDatabase[prodIndex].image = imageBase64;
+        fetch(`/api/products/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+        .then(async res => {
+          if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.error || 'Failed to update product');
+          }
+          return res.json();
+        })
+        .then(updatedProd => {
+          const prodIndex = productsDatabase.findIndex(p => p.id === id);
+          if (prodIndex > -1) {
+            productsDatabase[prodIndex] = updatedProd;
           }
           saveData();
           alert('Product details updated successfully!');
-        }
+          closeModal(adminProductModal);
+          renderProducts();
+          renderNewArrivals();
+        })
+        .catch(err => {
+          console.error(err);
+          alert(`Failed to update product: ${err.message}`);
+        });
       } else {
         // --- ADD MODE ---
         if (!imageBase64) {
           alert('Please select and upload a product clothing photo.');
           return;
         }
+        payload.image = imageBase64;
+        payload.isNew = true;
 
-        const newProd = {
-          id: 'p_' + Date.now(),
-          name,
-          price,
-          category,
-          rating: 4.8,
-          reviewsCount: 1,
-          image: imageBase64,
-          badge,
-          isNew: true
-        };
-        productsDatabase.unshift(newProd);
-        saveData();
-        alert('New product successfully published to boutique catalog!');
+        fetch('/api/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+        .then(async res => {
+          if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.error || 'Failed to add product');
+          }
+          return res.json();
+        })
+        .then(newProd => {
+          productsDatabase.unshift(newProd);
+          saveData();
+          alert('New product successfully published to boutique catalog!');
+          closeModal(adminProductModal);
+          renderProducts();
+          renderNewArrivals();
+        })
+        .catch(err => {
+          console.error(err);
+          alert(`Failed to publish product: ${err.message}`);
+        });
       }
-
-      closeModal(adminProductModal);
-      renderProducts();
-      renderNewArrivals();
     });
   }
 }
@@ -519,12 +580,32 @@ function initBrandingListeners() {
       const newLogo = inputBrandLogoBase64.value;
       const newHero = inputBrandHeroBase64.value;
 
-      if (newLogo) localStorage.setItem('curvy_comfort_brand_logo', newLogo);
-      if (newHero) localStorage.setItem('curvy_comfort_brand_hero', newHero);
+      const payload = {};
+      if (newLogo) payload.brand_logo = newLogo;
+      if (newHero) payload.brand_hero = newHero;
 
-      applyBrandingVisuals();
-      closeModal(adminBrandingModal);
-      alert('Store branding graphics successfully updated!');
+      fetch('/api/branding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(async res => {
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Failed to update branding settings');
+        }
+        
+        if (newLogo) localStorage.setItem('curvy_comfort_brand_logo', newLogo);
+        if (newHero) localStorage.setItem('curvy_comfort_brand_hero', newHero);
+
+        applyBrandingVisuals();
+        closeModal(adminBrandingModal);
+        alert('Store branding graphics successfully updated!');
+      })
+      .catch(err => {
+        console.error(err);
+        alert(`Failed to update branding graphics: ${err.message}`);
+      });
     });
   }
 
@@ -534,21 +615,38 @@ function initBrandingListeners() {
       const conf = confirm('Reset branding visuals back to default logo and hero banner graphics?');
       if (!conf) return;
 
-      localStorage.removeItem('curvy_comfort_brand_logo');
-      localStorage.removeItem('curvy_comfort_brand_hero');
-      
-      // Restore defaults immediately in the DOM
-      document.querySelectorAll('.brand-logo-element').forEach(el => {
-        el.src = defaultImageSrc('/logo.jpg');
-      });
-      const faviconLink = document.getElementById('favicon-link');
-      if (faviconLink) faviconLink.href = defaultImageSrc('/logo.jpg');
-      
-      const heroEl = document.getElementById('brand-hero-element');
-      if (heroEl) heroEl.src = defaultImageSrc('/hero_banner.png');
+      // Post empty values to backend to clear database settings
+      fetch('/api/branding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brand_logo: '', brand_hero: '' })
+      })
+      .then(async res => {
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Failed to reset branding on server');
+        }
+        
+        localStorage.removeItem('curvy_comfort_brand_logo');
+        localStorage.removeItem('curvy_comfort_brand_hero');
+        
+        // Restore defaults immediately in the DOM
+        document.querySelectorAll('.brand-logo-element').forEach(el => {
+          el.src = defaultImageSrc('/logo.jpg');
+        });
+        const faviconLink = document.getElementById('favicon-link');
+        if (faviconLink) faviconLink.href = defaultImageSrc('/logo.jpg');
+        
+        const heroEl = document.getElementById('brand-hero-element');
+        if (heroEl) heroEl.src = defaultImageSrc('/hero_banner.png');
 
-      closeModal(adminBrandingModal);
-      alert('Branding reverted back to standard design defaults.');
+        closeModal(adminBrandingModal);
+        alert('Branding reverted back to standard design defaults.');
+      })
+      .catch(err => {
+        console.error(err);
+        alert(`Failed to reset branding: ${err.message}`);
+      });
     });
   }
 }
@@ -595,21 +693,35 @@ window.deleteProduct = (id) => {
   const confirmDelete = confirm(`Are you sure you want to permanently delete "${p.name}" from the store catalog?`);
   if (!confirmDelete) return;
 
-  // Remove from catalog
-  productsDatabase = productsDatabase.filter(prod => prod.id !== id);
-  
-  // Remove from cart and wishlist if present
-  cart = cart.filter(item => item.id !== id);
-  wishlist = wishlist.filter(item => item.id !== id);
-  recentlyViewed = recentlyViewed.filter(item => item.id !== id);
+  fetch(`/api/products/${id}`, {
+    method: 'DELETE'
+  })
+  .then(async res => {
+    if (!res.ok) {
+      const errData = await res.json();
+      throw new Error(errData.error || 'Failed to delete product');
+    }
+    
+    // Remove from catalog
+    productsDatabase = productsDatabase.filter(prod => prod.id !== id);
+    
+    // Remove from cart and wishlist if present
+    cart = cart.filter(item => item.id !== id);
+    wishlist = wishlist.filter(item => item.id !== id);
+    recentlyViewed = recentlyViewed.filter(item => item.id !== id);
 
-  saveData();
-  renderProducts();
-  renderNewArrivals();
-  renderCartDrawer();
-  renderRecentlyViewed();
-  
-  alert('Product removed from database catalog successfully.');
+    saveData();
+    renderProducts();
+    renderNewArrivals();
+    renderCartDrawer();
+    renderRecentlyViewed();
+    
+    alert('Product removed from database catalog successfully.');
+  })
+  .catch(err => {
+    console.error(err);
+    alert(`Failed to delete product: ${err.message}`);
+  });
 };
 
 // --- RENDER PRODUCTS GRID ---
@@ -993,7 +1105,29 @@ function initiateCheckout() {
   const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${fullMessage}`;
   
   trackAnalyticsEvent('begin_checkout', { value: subtotal, currency: 'INR', items: cart });
-  window.open(whatsappUrl, '_blank');
+  
+  // Log the checkout order to the backend MySQL database
+  fetch('/api/orders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      items: cart.map(item => ({
+        id: item.id,
+        name: item.name,
+        price: item.price,
+        quantity: item.quantity,
+        category: item.category
+      })),
+      total_price: subtotal
+    })
+  })
+  .then(res => {
+    if (!res.ok) console.warn('Failed to store order log on server.');
+  })
+  .catch(err => console.error('Error logging order to database:', err))
+  .finally(() => {
+    window.open(whatsappUrl, '_blank');
+  });
 }
 
 // --- DRAWER OPEN/CLOSE SYSTEM ---
