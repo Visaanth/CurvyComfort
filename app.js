@@ -228,11 +228,33 @@ function loadLocalCartAndWishlist() {
   if (storedRecent) recentlyViewed = JSON.parse(storedRecent);
 }
 
+async function handleResponse(res, defaultErrorMsg = 'API request failed') {
+  if (res.ok) {
+    return res.json();
+  }
+  
+  let errMsg = defaultErrorMsg;
+  try {
+    const errData = await res.json();
+    errMsg = errData.error || errMsg;
+  } catch (_) {
+    // Response is not JSON (probably HTML error page)
+    try {
+      const text = await res.text();
+      if (text) {
+        // Strip HTML tags to extract readable error text
+        const cleanText = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        errMsg = cleanText.substring(0, 150) || errMsg;
+      }
+    } catch (__) {}
+  }
+  throw new Error(errMsg);
+}
+
 async function fetchProducts() {
   try {
     const response = await fetch('/api/products');
-    if (!response.ok) throw new Error('Failed to fetch catalog');
-    productsDatabase = await response.json();
+    productsDatabase = await handleResponse(response, 'Failed to fetch catalog');
     
     // Filter cart/wishlist/recent to only contain items present in the backend catalog
     cart = cart.filter(item => productsDatabase.some(p => p.id === item.id));
@@ -251,8 +273,7 @@ async function fetchProducts() {
 async function fetchBranding() {
   try {
     const response = await fetch('/api/branding');
-    if (!response.ok) throw new Error('Failed to load branding settings');
-    const branding = await response.json();
+    const branding = await handleResponse(response, 'Failed to load branding settings');
     
     if (branding.brand_logo) {
       localStorage.setItem('curvy_comfort_brand_logo', branding.brand_logo);
@@ -366,13 +387,7 @@ function initAdminListeners() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
       })
-      .then(async res => {
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || 'Invalid credentials');
-        }
-        return res.json();
-      })
+      .then(res => handleResponse(res, 'Invalid credentials'))
       .then(data => {
         if (data.success) {
           localStorage.setItem('curvy_comfort_admin_active', 'true');
@@ -454,13 +469,7 @@ function initAdminListeners() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         })
-        .then(async res => {
-          if (!res.ok) {
-            const errData = await res.json();
-            throw new Error(errData.error || 'Failed to update product');
-          }
-          return res.json();
-        })
+        .then(res => handleResponse(res, 'Failed to update product'))
         .then(updatedProd => {
           const prodIndex = productsDatabase.findIndex(p => p.id === id);
           if (prodIndex > -1) {
@@ -490,13 +499,7 @@ function initAdminListeners() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         })
-        .then(async res => {
-          if (!res.ok) {
-            const errData = await res.json();
-            throw new Error(errData.error || 'Failed to add product');
-          }
-          return res.json();
-        })
+        .then(res => handleResponse(res, 'Failed to add product'))
         .then(newProd => {
           productsDatabase.unshift(newProd);
           saveData();
@@ -589,12 +592,8 @@ function initBrandingListeners() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
-      .then(async res => {
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || 'Failed to update branding settings');
-        }
-        
+      .then(res => handleResponse(res, 'Failed to update branding settings'))
+      .then(() => {
         if (newLogo) localStorage.setItem('curvy_comfort_brand_logo', newLogo);
         if (newHero) localStorage.setItem('curvy_comfort_brand_hero', newHero);
 
@@ -621,12 +620,8 @@ function initBrandingListeners() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ brand_logo: '', brand_hero: '' })
       })
-      .then(async res => {
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || 'Failed to reset branding on server');
-        }
-        
+      .then(res => handleResponse(res, 'Failed to reset branding on server'))
+      .then(() => {
         localStorage.removeItem('curvy_comfort_brand_logo');
         localStorage.removeItem('curvy_comfort_brand_hero');
         
@@ -696,12 +691,8 @@ window.deleteProduct = (id) => {
   fetch(`/api/products/${id}`, {
     method: 'DELETE'
   })
-  .then(async res => {
-    if (!res.ok) {
-      const errData = await res.json();
-      throw new Error(errData.error || 'Failed to delete product');
-    }
-    
+  .then(res => handleResponse(res, 'Failed to delete product'))
+  .then(() => {
     // Remove from catalog
     productsDatabase = productsDatabase.filter(prod => prod.id !== id);
     
