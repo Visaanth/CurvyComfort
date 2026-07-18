@@ -267,106 +267,6 @@ const serializeOrder = (order) => {
   };
 };
 
-// --- SEED DEFAULT PRODUCTS ---
-const DEFAULT_PRODUCTS = [
-  {
-    id: "p1",
-    name: "Vibrant Maroon Anarkali Set",
-    price: 3499.00,
-    originalPrice: 4299.00,
-    category: "ethnic",
-    rating: 4.9,
-    reviewsCount: 124,
-    image: "/ethnic_wear.png",
-    badge: "Best Seller",
-    isNew: false
-  },
-  {
-    id: "p2",
-    name: "Floral Cotton Kurta Set",
-    price: 1599.00,
-    originalPrice: 1999.00,
-    category: "casual",
-    rating: 4.7,
-    reviewsCount: 86,
-    image: "/casual_wear.png",
-    badge: "",
-    isNew: true
-  },
-  {
-    id: "p3",
-    name: "Royal Red & Gold Lehenga",
-    price: 4599.00,
-    originalPrice: 5999.00,
-    category: "party",
-    rating: 5.0,
-    reviewsCount: 62,
-    image: "/party_wear.png",
-    badge: "Exclusive",
-    isNew: false
-  },
-  {
-    id: "p5",
-    name: "Emerald Green Ready-Made Blouse",
-    price: 1499.00,
-    originalPrice: 1899.00,
-    category: "blouse",
-    rating: 4.9,
-    reviewsCount: 93,
-    image: "/readymade_blouse.png",
-    badge: "Sale",
-    isNew: true
-  },
-  {
-    id: "p6",
-    name: "Cotton Motif Loungewear Co-ord Set",
-    price: 2299.00,
-    originalPrice: 2799.00,
-    category: "loungewear",
-    rating: 4.6,
-    reviewsCount: 78,
-    image: "/loungewear.png",
-    badge: "",
-    isNew: false
-  },
-  {
-    id: "p7",
-    name: "Golden Embroidered Kurti",
-    price: 2199.00,
-    originalPrice: 2599.00,
-    category: "ethnic",
-    rating: 4.8,
-    reviewsCount: 110,
-    image: "/ethnic_wear.png",
-    badge: "",
-    isNew: true
-  },
-  {
-    id: "p8",
-    name: "Printed Cotton Kurta & Palazzo",
-    price: 1899.00,
-    originalPrice: 2299.00,
-    category: "casual",
-    rating: 4.7,
-    reviewsCount: 57,
-    image: "/casual_wear.png",
-    badge: "",
-    isNew: false
-  }
-];
-
-const seedDatabase = async () => {
-  try {
-    const productCount = await Product.count();
-    if (productCount === 0) {
-      await Product.bulkCreate(DEFAULT_PRODUCTS);
-      console.log("Database successfully seeded with default products!");
-    }
-  } catch (err) {
-    console.error(`Error seeding database: ${err}`);
-  }
-};
-
 // Initialize connection and sync tables
 try {
   await sequelize.authenticate();
@@ -374,7 +274,6 @@ try {
   
   // Sync schemas with Postgres database (create tables if they do not exist)
   await sequelize.sync();
-  await seedDatabase();
 } catch (err) {
   console.error('Database connection failed or tables already exist. Error:', err);
 }
