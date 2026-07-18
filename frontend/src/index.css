@@ -945,11 +945,11 @@ header.scrolled .logo-img {
   display: none;
 }
 
-body.admin-mode .admin-card-controls {
+.admin-mode .admin-card-controls {
   display: flex;
 }
 
-body.admin-mode .product-badge {
+.admin-mode .product-badge {
   /* Offset badge slightly when admin options are visible */
   left: auto;
   right: 65px;
