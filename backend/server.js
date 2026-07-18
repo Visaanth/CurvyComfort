@@ -595,6 +595,15 @@ app.post('/api/orders', async (req, res) => {
   }
 });
 
+// Serve static files from the React frontend build
+const frontendDistPath = path.resolve(__dirname, '../frontend/dist');
+app.use(express.static(frontendDistPath));
+
+// Support client-side routing by redirecting all other requests to index.html
+app.get('*', (req, res) => {
+  res.sendFile(path.resolve(frontendDistPath, 'index.html'));
+});
+
 // Export app for serverless environments (like Vercel)
 export default app;
 
